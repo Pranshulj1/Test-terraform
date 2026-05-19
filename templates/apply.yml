@@ -1,0 +1,69 @@
+parameters:
+- name: environment
+  type: string
+- name: environmentName
+  type: string
+- name: workload
+  type: string
+- name: serviceConnection
+  type: string
+- name: resourceGroup
+  type: string
+- name: storageAccount
+  type: string
+- name: containerName
+  type: string
+- name: poolName
+  type: string
+  default: Linux-SHA-Pool
+- name: dependsOn
+  type: object
+  default: []
+
+jobs:
+- deployment: Apply_${{ parameters.workload }}
+  displayName: Apply ${{ parameters.workload }}
+  dependsOn: ${{ parameters.dependsOn }}
+
+  # THIS triggers approval
+  environment: ${{ parameters.environmentName }}
+
+  pool:
+    name: ${{ parameters.poolName }}
+
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+
+        - task: DownloadPipelineArtifact@2
+          displayName: Download Plan Artifact
+          inputs:
+            artifact: ${{ parameters.environment }}-${{ parameters.workload }}-plan
+            path: $(System.DefaultWorkingDirectory)
+
+        - task: TerraformInstaller@0
+          inputs:
+            terraformVersion: latest
+
+        - task: TerraformTaskV2@2
+          displayName: Terraform Init
+          inputs:
+            provider: azurerm
+            command: init
+            workingDirectory: $(System.DefaultWorkingDirectory)/Workload/${{ parameters.environment }}/${{ parameters.workload }}
+            backendServiceArm: ${{ parameters.serviceConnection }}
+            backendAzureRmResourceGroupName: ${{ parameters.resourceGroup }}
+            backendAzureRmStorageAccountName: ${{ parameters.storageAccount }}
+            backendAzureRmContainerName: ${{ parameters.containerName }}
+            backendAzureRmKey: ${{ parameters.environment }}-${{ parameters.workload }}.tfstate
+
+        - task: TerraformTaskV2@2
+          displayName: Terraform Apply
+          inputs:
+            provider: azurerm
+            command: apply
+            workingDirectory: $(System.DefaultWorkingDirectory)/Workload/${{ parameters.environment }}/${{ parameters.workload }}
+            environmentServiceNameAzureRM: ${{ parameters.serviceConnection }}
+            commandOptions: $(System.DefaultWorkingDirectory)/${{ parameters.workload }}.tfplan

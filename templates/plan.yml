@@ -1,0 +1,62 @@
+parameters:
+- name: plan_environment
+  type: string
+- name: workload
+  type: string
+- name: serviceConnection
+  type: string
+- name: resourceGroup
+  type: string
+- name: storageAccount
+  type: string
+- name: containerName
+  type: string
+- name: poolName
+  type: string
+  default: Linux-SHA-Pool
+- name: dependsOn
+  type: object
+  default: []
+
+jobs:
+- job: Plan_${{ parameters.workload }}
+  displayName: Plan ${{ parameters.workload }}
+  dependsOn: ${{ parameters.dependsOn }}
+
+  pool:
+    name: ${{ parameters.poolName }}
+
+  steps:
+  - checkout: self
+
+  - task: TerraformInstaller@0
+    inputs:
+      terraformVersion: latest
+
+  - task: TerraformTaskV2@2
+    displayName: Terraform Init
+    inputs:
+      provider: azurerm
+      command: init
+      workingDirectory: $(System.DefaultWorkingDirectory)/Workload/${{ parameters.plan_environment }}/${{ parameters.workload }}
+      backendServiceArm: ${{ parameters.serviceConnection }}
+      backendAzureRmResourceGroupName: ${{ parameters.resourceGroup }}
+      backendAzureRmStorageAccountName: ${{ parameters.storageAccount }}
+      backendAzureRmContainerName: ${{ parameters.containerName }}
+      backendAzureRmKey: ${{ parameters.plan_environment }}-${{ parameters.workload }}.tfstate
+
+  - task: TerraformTaskV2@2
+    displayName: Terraform Plan
+    inputs:
+      provider: azurerm
+      command: plan
+      workingDirectory: $(System.DefaultWorkingDirectory)/Workload/${{ parameters.plan_environment }}/${{ parameters.workload }}
+      environmentServiceNameAzureRM: ${{ parameters.serviceConnection }}
+      commandOptions: >
+        -var-file=$(System.DefaultWorkingDirectory)/Deployment/${{ parameters.plan_environment }}/${{ parameters.workload }}/${{ lower(parameters.workload) }}.tfvars
+        -out=$(System.DefaultWorkingDirectory)/${{ parameters.workload }}.tfplan
+
+  - task: PublishPipelineArtifact@1
+    inputs:
+      targetPath: $(System.DefaultWorkingDirectory)/${{ parameters.workload }}.tfplan
+      artifact: ${{ parameters.plan_environment }}-${{ parameters.workload }}-plan
