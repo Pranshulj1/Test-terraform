@@ -18,8 +18,8 @@ parameters:
   default: false
 
 variables:
-  bk_rg: abhishek-rg
-  bk_sa: asdfghjk09
+  bk_rg: *
+  bk_sa: *
   bk_container: tfstate
   svc_conn: AD-TF
 
