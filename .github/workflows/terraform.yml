@@ -1,0 +1,188 @@
+name: Terraform Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+
+      environment:
+        description: Select Environment
+        required: true
+        default: Dev
+        type: choice
+        options:
+          - Dev
+          - Prod
+
+      deployNetwork:
+        description: Deploy Network
+        required: true
+        default: true
+        type: boolean
+
+      deployData:
+        description: Deploy Data
+        required: true
+        default: false
+        type: boolean
+
+env:
+  BK_RG: your-backend-rg
+  BK_SA: yourstorageaccount
+  BK_CONTAINER: tfstate
+
+jobs:
+
+# ==================================================
+# INIT
+# ==================================================
+  init:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Initialize
+      run: echo "Initializing Terraform deployment..."
+
+# ==================================================
+# NETWORK PLAN
+# ==================================================
+  network-plan:
+    if: ${{ inputs.deployNetwork }}
+    needs: init
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Terraform Init
+      working-directory: ./Workload/${{ inputs.environment }}/Network
+      run: |
+        terraform init \
+        -backend-config="resource_group_name=${{ env.BK_RG }}" \
+        -backend-config="storage_account_name=${{ env.BK_SA }}" \
+        -backend-config="container_name=${{ env.BK_CONTAINER }}" \
+        -backend-config="key=${{ inputs.environment }}-Network.tfstate"
+
+    - name: Terraform Plan
+      working-directory: ./Workload/${{ inputs.environment }}/Network
+      run: |
+        terraform plan \
+        -var-file=../../../Deployment/${{ inputs.environment }}/Network/network.tfvars \
+        -out=Network.tfplan
+
+    - name: Upload Network Plan
+      uses: actions/upload-artifact@v4
+      with:
+        name: network-plan
+        path: ./Workload/${{ inputs.environment }}/Network/Network.tfplan
+
+# ==================================================
+# DATA PLAN
+# ==================================================
+  data-plan:
+    if: ${{ inputs.deployData }}
+    needs: init
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Terraform Init
+      working-directory: ./Workload/${{ inputs.environment }}/Data
+      run: terraform init
+
+    - name: Terraform Plan
+      working-directory: ./Workload/${{ inputs.environment }}/Data
+      run: |
+        terraform plan \
+        -var-file=../../../Deployment/${{ inputs.environment }}/Data/data.tfvars \
+        -out=Data.tfplan
+
+    - name: Upload Data Plan
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-plan
+        path: ./Workload/${{ inputs.environment }}/Data/Data.tfplan
+
+# ==================================================
+# NETWORK APPLY
+# ==================================================
+  network-apply:
+    if: ${{ inputs.deployNetwork }}
+    needs: network-plan
+    runs-on: ubuntu-latest
+
+    environment:
+      name: ${{ inputs.environment }}-apply
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - uses: hashicorp/setup-terraform@v3
+
+    - name: Download Plan
+      uses: actions/download-artifact@v4
+      with:
+        name: network-plan
+        path: ./Workload/${{ inputs.environment }}/Network
+
+    - name: Terraform Init
+      working-directory: ./Workload/${{ inputs.environment }}/Network
+      run: terraform init
+
+    - name: Terraform Apply
+      working-directory: ./Workload/${{ inputs.environment }}/Network
+      run: terraform apply -auto-approve Network.tfplan
+
+# ==================================================
+# DATA APPLY
+# ==================================================
+  data-apply:
+    if: ${{ inputs.deployData }}
+    needs: data-plan
+    runs-on: ubuntu-latest
+
+    environment:
+      name: ${{ inputs.environment }}-apply
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - uses: hashicorp/setup-terraform@v3
+
+    - name: Download Plan
+      uses: actions/download-artifact@v4
+      with:
+        name: data-plan
+        path: ./Workload/${{ inputs.environment }}/Data
+
+    - name: Terraform Init
+      working-directory: ./Workload/${{ inputs.environment }}/Data
+      run: terraform init
+
+    - name: Terraform Apply
+      working-directory: ./Workload/${{ inputs.environment }}/Data
+      run: terraform apply -auto-approve Data.tfplan
